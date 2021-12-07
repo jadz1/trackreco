@@ -11,6 +11,7 @@ import argparse
 
 def getAllPaths(G, starting_nodes, ending_nodes):
     listofpath = []
+    list_hitid_path = []
     #for i in starting_nodes:
     #    paths = nx.all_simple_paths(G, i, ending_nodes)
     #    listofpath.append(paths)
@@ -19,7 +20,7 @@ def getAllPaths(G, starting_nodes, ending_nodes):
             for path in nx.all_simple_paths(G, source=i, target=j):
                 #print(path)
                 list_hitid_path = [G.nodes[i]["hit_id"] for i in path]
-                print(list_hitid_path)
+                #print(list_hitid_path)
                 listofpath.append(list_hitid_path)
     return listofpath
 
@@ -61,8 +62,7 @@ def main():
         G.remove_edges_from(list_fake_edges)
 
         ## Remove isolated nodes
-        #print(nx.number_of_isolates(G))
-        #isolates = np.array(nx.isolates(G))
+        print("Number of isolated hits = {}".format(nx.number_of_isolates(G)))
         isolates=[node for node in G.nodes if G.degree(node) == 0]
         #print(isolates)
         G.remove_nodes_from(list(nx.isolates(G)))
@@ -93,6 +93,7 @@ def main():
 
         if doWalk:
             list_of_path = getAllPaths(G, starting_nodes, ending_nodes)
+            #list_of_path_hitid = [for  in list_of_path[]]print(G.nodes[list_of_path[0][0]]["hit_id"])
             #print(list_of_path)
             ## Check the min and max lengths
             if debug:
