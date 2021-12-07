@@ -20,7 +20,7 @@ def getAllPaths(G, starting_nodes, ending_nodes):
             for path in nx.all_simple_paths(G, source=i, target=j):
                 #print(path)
                 list_hitid_path = [G.nodes[i]["hit_id"] for i in path]
-                #print(list_hitid_path)
+                print(list_hitid_path)
                 listofpath.append(list_hitid_path)
     return listofpath
 
@@ -92,6 +92,8 @@ def main():
         all_path = pd.DataFrame()
 
         if doWalk:
+            trackid = []
+            listpath = []
             list_of_path = getAllPaths(G, starting_nodes, ending_nodes)
             #list_of_path_hitid = [for  in list_of_path[]]print(G.nodes[list_of_path[0][0]]["hit_id"])
             #print(list_of_path)
@@ -105,10 +107,23 @@ def main():
                         if(len(i) < min):
                             min = len(i)
                 print("Max = {}, Min = {}".format(max, min))
-            all_path["path"] = list_of_path
+            for i in range(len(list_of_path)):
+                for j in range(len(list_of_path[i])):
+                    trackid.append(i)
+                    listpath.append(list_of_path[i][j])
+                    #print(list_of_path[i][j])
+
+            all_path["track_id"] = trackid
+            all_path["path"] = listpath
 
         if doLabComp:
             print("under construction")
+
+            for c in sorted(nx.connected_components(G)):
+                print (c)
+            list_of_path = [     len(c)     for c in sorted(nx.weakly_connected_components(G), key=len) ]
+            print(list_of_path)
+            all_path["path"] = list_of_path
 
         frame_path.append(all_path)
 
