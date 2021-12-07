@@ -17,8 +17,10 @@ def getAllPaths(G, starting_nodes, ending_nodes):
     for i in starting_nodes:
         for j in ending_nodes:
             for path in nx.all_simple_paths(G, source=i, target=j):
-                print(path)
-                listofpath.append(path)
+                #print(path)
+                list_hitid_path = [G.nodes[i]["hit_id"] for i in path]
+                print(list_hitid_path)
+                listofpath.append(list_hitid_path)
     return listofpath
 
 
