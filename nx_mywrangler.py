@@ -128,25 +128,29 @@ def main():
         ################################################################################################################
         ################################################################################################################
         ## open truth container
-        truth = pd.read_csv("input/event980to1k/event000000{}-truth.csv".format(i))
+        truth = pd.read_csv("input/event000000{}-truth.csv".format(i))
         ## open particles container
-        particles = pd.read_csv("input/event980to1k/event000000{}-particles.csv".format(i))
+        particles = pd.read_csv("input/event000000{}-particles.csv".format(i))
 
 
         ## Get list of particle_ids for particles of interest
-        list_hits_matched = GetParticles(truth, particles, 1000, 3, True)
+        list_selected_particle_id = GetParticles(truth, particles, 1000, 3, True)
+        #print(list_selected_particle_id[0])
+        list_selected_hits = [list(truth[truth["particle_id"] == i].hit_id.values) for i in list_selected_particle_id]
+        #print(list_selected_hits)
         ## Store particles of interest in dataframe
         all_particles_with_hits = pd.DataFrame()
-        all_particles_with_hits["particles_with_hits_hit_id"] = list_hits_matched
+        all_particles_with_hits["selected_particle_id"] = list_selected_particle_id
+        all_particles_with_hits["selected_hit_id"] = list_selected_hits
         #all_particles_with_hits["particles_with_hits_iterator"] = list_hits_matched_particle_iterator
         frame_particles_with_hits.append(all_particles_with_hits)
-
+        #print(list_hits_matched)
         ################################################################################################################
         ################################################################################################################
 
         ## Let's read the graph now
         ## Load graph from inference (gpickle format)
-        G = nx.read_gpickle("data/event{}_reduced_0.0.gpickle".format(i))
+        G = nx.read_gpickle("event{}_reduced_0.0.gpickle".format(i))
         #G = nx.read_gpickle("data/RW2_FW0p2_LR0p0005/event{}_reduced_0.5.gpickle".format(i))
 
         ############################
@@ -317,7 +321,7 @@ def main():
             all_path_edge["path_edge_solution"] = list_edge_solution
             all_path_edge["path_edge_pt"] = list_edge_pt
             #all_path["path"] = listpath
-
+            #print(list_node_hit_id)
         if doLabComp:
             print("under construction")
 
@@ -331,6 +335,15 @@ def main():
         frame_path_edge.append(all_path_edge)
 
 
+        print(len(list_selected_hits))
+        print(len(listpath_node_hit_id))
+        for ireco in listpath_node_hit_id:
+            for itruth in list_selected_hits:
+                if(len(np.intersect1d(ireco, itruth )) != 0):
+                    print(np.intersect1d(ireco, itruth))
+        #print("list_selected_hits = {}".format(list_selected_hits[0]))
+        #print("list_node_hit_id = {}".format(listpath_node_hit_id[0]))
+        #print("list of match = {}".format(np.intersect1d(list_node_hit_id, list_selected_hits[0])))
     ## Convert list of results to dataframe
     result_particles_with_hits = pd.concat(frame_particles_with_hits)
     result_isolates = pd.concat(frame_isolates)
@@ -344,7 +357,7 @@ def main():
         result_one_neighbor = pd.concat(frame_one_neighbor)
         result_two_neighbors = pd.concat(frame_two_neighbors)
 
-    ## Save dataframe as csv files   
+    ## Save dataframe as csv files
     result_particles_with_hits.to_csv("./nx_particles_with_hits_mywrangler.csv")
     result_isolates.to_csv("./nx_isolates_mywrangler.csv")
     result_start.to_csv("./nx_start_mywrangler.csv")
