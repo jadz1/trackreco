@@ -1,50 +1,16 @@
 import os
 import shutil
-import graph_tool.all as gt
 import numpy as np
 import pandas as pd
 import time
 import networkx as nx
 from sklearn import linear_model
 import argparse
+import ROOT as r
 
-def getPhi(x, y):
-    return np.arctan2(y, x)
-
-def GetParticles(hits, particles, ptCut, nHits, phiSlice, phiMin=0, phiMax=1):
-    InterestingParticles = particles[(particles.pt >= ptCut) & (particles.barcode<200000)].copy()
-
-    # we need to cut as weel on the number of hits, to do so we can count the number of hits of each particles
-    # and then only count one hits on each modules (doesn't matter which one here)
-    nhits =  hits.drop_duplicates(subset=['particle_id',
-                                      'hardware',
-                                      'barrel_endcap',
-                                      'layer_disk',
-                                      'eta_module',
-                                      'phi_module'], keep='last')
-    nhits = nhits.groupby("particle_id")["hit_id"].count()
-    nhits = nhits.reset_index().rename(columns={"index":"particle_id", "hit_id": "nhit_diffModule"})
-
-    nhits = nhits[nhits.nhit_diffModule>=nHits]
-
-    if phiSlice:
-        phihits = getPhi(hits.x, hits.y)
-        hits["phi_hits"] = phihits
-        hits = hits[(hits.phi_hits>phiMin) & (hits.phi_hits<phiMax)]
-
-    #applied the cuts on the number of hits, the pt and remove secondaries
-    hitsInfo = hits.merge(nhits, on="particle_id")
-    hitsInfo = hitsInfo.merge(InterestingParticles, on = "particle_id")
-
-
-    #only keep the hit_id and the particle_id
-    list_PIDs = list(pd.unique(hitsInfo.particle_id))
-
-    print("\n============= READ DATA =============")
-    print("There are {} particles to reconstruct.".format(len(list_PIDs)))
-
-    return list_PIDs
-
+from tools.selection import GetParticles
+from tools.filterGraph import filterGraph
+from tools.plottrackreco import plotTrackRecoEff
 
 def getAllPaths(G, starting_nodes, ending_nodes):
 
@@ -119,22 +85,38 @@ def main():
     frame_two_neighbors = []
     list_hits_matched = []
     list_hits_matched_particle_iterator = []
-    debug = False
+    debug = True
+
+    #r.gStyle.SetOptStat(0)
+    htruth_pt_perfect = r.TH1D("","",20, 0, 10)
+    hreco_pt_perfect = r.TH1D("","",20, 0, 10)
+
+    htruth_eta_perfect = r.TH1D("","",25,-5,5)
+    hreco_eta_perfect = r.TH1D("","",25,-5,5)
+
+    htruth_phi_perfect = r.TH1D("","",30,-1,2)
+    hreco_phi_perfect = r.TH1D("","",30,-1,2)
+
+    htrack_eff_pt_perfect  = r.TH1D("","",20, 0, 10)
+    htrack_eff_eta_perfect  = r.TH1D("","",25,-5,5)
+    htrack_eff_phi_perfect  = r.TH1D("","",30,-1,2)
+
     ## Loop over all events
-    for i in range(980,981):
-    #for i in range(0,1):
+    for i in range(980,1000):
         print("Processing event #{}".format(i))
 
         ################################################################################################################
         ################################################################################################################
         ## open truth container
-        truth = pd.read_csv("input/event000000{}-truth.csv".format(i))
+        truth = pd.read_csv("input/event980to1k/event000000{}-truth.csv".format(i))
         ## open particles container
-        particles = pd.read_csv("input/event000000{}-particles.csv".format(i))
+        particles = pd.read_csv("input/event980to1k/event000000{}-particles.csv".format(i))
 
 
         ## Get list of particle_ids for particles of interest
-        list_selected_particle_id = GetParticles(truth, particles, 1000, 3, True)
+        ## GetParticles(hits, particles, ptCut, nHits, etaSlice, phiSlice, etaMin=0, etaMax=2, phiMin=0, phiMax=1):
+        list_selected_particle_id = GetParticles(truth, particles, 1000, 3, False, True)
+
         #print(list_selected_particle_id[0])
         list_selected_hits = [list(truth[truth["particle_id"] == i].hit_id.values) for i in list_selected_particle_id]
         #print(list_selected_hits)
@@ -150,26 +132,17 @@ def main():
 
         ## Let's read the graph now
         ## Load graph from inference (gpickle format)
-        G = nx.read_gpickle("event{}_reduced_0.0.gpickle".format(i))
+        G = nx.read_gpickle("data/event{}_reduced_0.0.gpickle".format(i))
         #G = nx.read_gpickle("data/RW2_FW0p2_LR0p0005/event{}_reduced_0.5.gpickle".format(i))
+
 
         ############################
         ## Filter graph
         ############################
-        ## Remove edges above threshold
-        list_fake_edges = [(u,v) for u,v,e in G.edges(data=True) if e['solution'] == 0]
-        #print(list_fake_edges)
-        G.remove_edges_from(list_fake_edges)
-
-        ## Remove isolated nodes
-        print("Number of isolated hits = {}".format(nx.number_of_isolates(G)))
-        isolates=[node for node in G.nodes if G.degree(node) == 0]
-        #print(isolates)
-        G.remove_nodes_from(list(nx.isolates(G)))
-
-        all_isolates = pd.DataFrame()
-        all_isolates["isolates"] = isolates
-        frame_isolates.append(all_isolates)
+        ## filterGraph(Graph, prediction_or_solution='solution', threshold=0)
+        ## either choose solution with 0
+        ## or prediction and a certain threshold
+        G = filterGraph(G, 'solution', 0)
 
         ##################################
         ## Get starting and ending nodes
@@ -202,49 +175,6 @@ def main():
         all_end["end_phi"] = ending_nodes_phi
         frame_end.append(all_end)
         print("========================================================================")
-
-        if debug:
-            ## Put node with one neighbor in a list (we should find all of these later in starting_nodes or ending_nodes)
-            Nodes_One_Neighbor = [list(nx.all_neighbors(G, node))[0] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 1)]
-            Nodes_One_Neighbor_hit_id = [G.nodes[list(nx.all_neighbors(G, node))[0]]['hit_id'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 1)]
-            Nodes_One_Neighbor_r = [G.nodes[list(nx.all_neighbors(G, node))[0]]['r'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 1)]
-            Nodes_One_Neighbor_z = [G.nodes[list(nx.all_neighbors(G, node))[0]]['z'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 1)]
-            Nodes_One_Neighbor_phi = [G.nodes[list(nx.all_neighbors(G, node))[0]]['phi'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 1)]
-            all_one_neighbor = pd.DataFrame()
-            all_one_neighbor["Nodes_One_Neighbor"] = Nodes_One_Neighbor
-            all_one_neighbor["Nodes_One_Neighbor_hit_id"] = Nodes_One_Neighbor_hit_id
-            all_one_neighbor["Nodes_One_Neighbor_r"] = Nodes_One_Neighbor_r
-            all_one_neighbor["Nodes_One_Neighbor_z"] = Nodes_One_Neighbor_z
-            all_one_neighbor["Nodes_One_Neighbor_phi"] = Nodes_One_Neighbor_phi
-            frame_one_neighbor.append(all_one_neighbor)
-
-            ## Put node with two neighbors in a list (these should constitue the middle of the track)
-            Nodes_Two_Neighbors = [list(nx.all_neighbors(G, node)) for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 2)]
-            Nodes_Two_Neighbors_hit_id = [G.nodes[list(nx.all_neighbors(G, node))[0]]['hit_id'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 2)]
-            Nodes_Two_Neighbors_r = [G.nodes[list(nx.all_neighbors(G, node))[0]]['r'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 2)]
-            Nodes_Two_Neighbors_z = [G.nodes[list(nx.all_neighbors(G, node))[0]]['z'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 2)]
-            Nodes_Two_Neighbors_phi = [G.nodes[list(nx.all_neighbors(G, node))[0]]['phi'] for node in G.nodes if (len(list(nx.all_neighbors(G, node))) == 2)]
-            all_two_neighbors = pd.DataFrame()
-            all_two_neighbors["Nodes_two_Neighbor"] = Nodes_Two_Neighbors
-            all_two_neighbors["Nodes_two_Neighbor_hit_id"] = Nodes_Two_Neighbors_hit_id
-            all_two_neighbors["Nodes_two_Neighbor_r"] = Nodes_Two_Neighbors_r
-            all_two_neighbors["Nodes_two_Neighbor_z"] = Nodes_Two_Neighbors_z
-            all_two_neighbors["Nodes_two_Neighbor_phi"] = Nodes_Two_Neighbors_phi
-            frame_two_neighbors.append(all_two_neighbors)
-
-            ## Put node with two neighbors in a list (these should not exist,
-                                                     #if they do, they must be in the predicted graph
-                                                     #and condition on edge score should be considered)
-            Nodes_More_Neighbors = [list(nx.all_neighbors(G, node)) for node in G.nodes if (len(list(nx.all_neighbors(G, node))) > 2)]
-
-
-            ## Check that all starting nodes are in Nodes_One_Neighbor
-            intersect_starting_nodes_OneNeighbor = np.in1d(starting_nodes, Nodes_One_Neighbor)
-            #print(intersect_starting_nodes_OneNeighbor)
-            ## Check that all ending nodes are in Nodes_One_Neighbor
-            intersect_ending_nodes_OneNeighbor = np.in1d(ending_nodes, Nodes_One_Neighbor)
-            #print(intersect_ending_nodes_OneNeighbor)
-
 
 
         all_path_node = pd.DataFrame()
@@ -280,7 +210,7 @@ def main():
             if debug:
                 max = 0
                 min = 1000
-                for i in list_of_path:
+                for i in listpath_node_hit_id:
                     if(len(i) > max):
                         max = len(i)
                         if(len(i) < min):
@@ -308,12 +238,13 @@ def main():
                     #print(list_of_path[i][j])
                     #listsolutionpath.append(list_solution_path[i][j])
 
-            all_path_node["track_id_node"] = trackid_node
+
             all_path_node["path_node_hit_id"] = list_node_hit_id
-            all_path_node["path_node_r"] = list_node_r
-            all_path_node["path_node_z"] = list_node_z
-            all_path_node["path_node_phi"] = list_node_phi
-            all_path_node["path_node_weight"] = list_node_weight
+            all_path_node["track_id_node"] = trackid_node
+            #all_path_node["path_node_r"] = list_node_r
+            #all_path_node["path_node_z"] = list_node_z
+            #all_path_node["path_node_phi"] = list_node_phi
+            #all_path_node["path_node_weight"] = list_node_weight
 
             all_path_edge["track_id_edge"] = trackid_edge
             all_path_edge["path_edge_prediction"] = list_edge_prediction
@@ -335,41 +266,55 @@ def main():
         frame_path_edge.append(all_path_edge)
 
 
-        print(len(list_selected_hits))
-        print(len(listpath_node_hit_id))
-        for ireco in listpath_node_hit_id:
-            for itruth in list_selected_hits:
-                if(len(np.intersect1d(ireco, itruth )) != 0):
-                    print(np.intersect1d(ireco, itruth))
-        #print("list_selected_hits = {}".format(list_selected_hits[0]))
-        #print("list_node_hit_id = {}".format(listpath_node_hit_id[0]))
-        #print("list of match = {}".format(np.intersect1d(list_node_hit_id, list_selected_hits[0])))
+
+        ################################################################################################################
+        ################################################################################################################
+
+
+        hreco_pt_perfect, htruth_pt_perfect = plotTrackRecoEff(hreco_pt_perfect, htruth_pt_perfect, particles, truth, list_selected_hits, listpath_node_hit_id, 'perfect', 'pt')
+        hreco_eta_perfect, htruth_eta_perfect = plotTrackRecoEff(hreco_eta_perfect, htruth_eta_perfect, particles, truth, list_selected_hits, listpath_node_hit_id, 'perfect', 'eta')
+        hreco_phi_perfect, htruth_phi_perfect = plotTrackRecoEff(hreco_phi_perfect, htruth_phi_perfect, particles, truth, list_selected_hits, listpath_node_hit_id, 'perfect', 'phi')
+
+
+        print("\n")
+
+    htrack_eff_pt_perfect.Divide(hreco_pt_perfect, htruth_pt_perfect, 1, 1, "B")
+    htrack_eff_eta_perfect.Divide(hreco_eta_perfect, htruth_eta_perfect, 1, 1, "B")
+    htrack_eff_phi_perfect.Divide(hreco_phi_perfect, htruth_phi_perfect, 1, 1, "B")
+
+    mean_from_pt  = hreco_pt_perfect.GetEntries() /  htruth_pt_perfect.GetEntries()
+    mean_from_eta  = hreco_eta_perfect.GetEntries() /  htruth_eta_perfect.GetEntries()
+    mean_from_phi  = hreco_phi_perfect.GetEntries() /  htruth_phi_perfect.GetEntries()
+
+    print("GetMean from pT = {}, from eta = {}, from phi = {}".format(mean_from_pt, mean_from_eta, mean_from_phi))
+    f = r.TFile.Open('trackEff.root', 'RECREATE')
+    htruth_pt_perfect.Write("truth_pt")
+    hreco_pt_perfect.Write("reco_pt")
+    htruth_eta_perfect.Write("truth_eta")
+    hreco_eta_perfect.Write("reco_eta")
+    htruth_phi_perfect.Write("truth_phi")
+    hreco_phi_perfect.Write("reco_phi")
+    htrack_eff_pt_perfect.Write("trackeff_pt")
+    htrack_eff_eta_perfect.Write("trackeff_eta")
+    htrack_eff_phi_perfect.Write("trackeff_phi")
+
+
+
     ## Convert list of results to dataframe
     result_particles_with_hits = pd.concat(frame_particles_with_hits)
-    result_isolates = pd.concat(frame_isolates)
     result_start = pd.concat(frame_start)
     result_end = pd.concat(frame_end)
-    #result_path = pd.concat(frame_path)
+    ## Dataframe with output same as first wrangler (2 columns, hit_id, track_id)
     result_path_node = pd.concat(frame_path_node)
     result_path_edge = pd.concat(frame_path_edge)
 
-    if debug:
-        result_one_neighbor = pd.concat(frame_one_neighbor)
-        result_two_neighbors = pd.concat(frame_two_neighbors)
-
     ## Save dataframe as csv files
     result_particles_with_hits.to_csv("./nx_particles_with_hits_mywrangler.csv")
-    result_isolates.to_csv("./nx_isolates_mywrangler.csv")
     result_start.to_csv("./nx_start_mywrangler.csv")
     result_end.to_csv("./nx_end_mywrangler.csv")
-    #result_path.to_csv("./nx_path_mywrangler.csv")
-    result_path_node.to_csv("./nx_path_node_mywrangler.csv")
+    result_path_node.to_csv("./nx_path_node_mywrangler.csv", index=False)
     result_path_edge.to_csv("./nx_path_edge_mywrangler.csv")
 
-    if debug:
-        result_one_neighbor.to_csv("./nx_result_one_neighbor_mywrangler.csv")
-        result_two_neighbors.to_csv("./nx_result_two_neighbors_mywrangler.csv")
-    #result_track.to_csv("./tracks_inout.csv")
     print("results saved.")
 
 
